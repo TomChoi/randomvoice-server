@@ -5,6 +5,7 @@ import model.SignalData
 import model.SignalType
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.handler.TextWebSocketHandler
@@ -18,8 +19,7 @@ class SignalingHandler : TextWebSocketHandler() {
     private val map1 = ObjectMapper()
     private val log1: Logger = LoggerFactory.getLogger(SignalingHandler::class.java)
 
-    @Override
-    private fun handleBinaryMessage(session: WebSocketSession, message: TextMessage) {
+    override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
         val msg1: String = message.payload
         val sigData: SignalData = map1.readValue(msg1, SignalData::class.java)
         log1.debug("Receive message from client:", msg1)
@@ -59,7 +59,7 @@ class SignalingHandler : TextWebSocketHandler() {
         val sigResp = SignalData()
         sigResp.userId = data.userId
         sigResp.type = SignalType.Offer.toString()
-        sigResp.data = data.data
+        sigResp.data = "data from signaling server"
         sigResp.toUid = data.toUid
         sessionMap[data.userId]?.let { session ->
             sendMessage(session, sigResp)
@@ -94,5 +94,15 @@ class SignalingHandler : TextWebSocketHandler() {
         } catch (e: Exception) {
             log1.error("Error Sending message:", e)
         }
+    }
+
+    override fun afterConnectionEstablished(session: WebSocketSession) {
+        sessions.add(session)
+        super.afterConnectionEstablished(session)
+    }
+
+    override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
+        sessions.remove(session)
+        super.afterConnectionClosed(session, status)
     }
 }

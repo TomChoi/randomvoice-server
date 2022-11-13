@@ -12,6 +12,6 @@ class SignalingConfiguration : WebSocketConfigurer {
     private val allowedOrigin: String = ""
 
     override fun registerWebSocketHandlers(registry: WebSocketHandlerRegistry) {
-        registry.addHandler(SignalingHandler(), "/socket1",).setAllowedOrigins(allowedOrigin)
+        registry.addHandler(SignalingHandler(), "/socket1")
     }
 }
