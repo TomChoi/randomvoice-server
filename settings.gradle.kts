@@ -1,1 +1,1 @@
-rootProject.name = "signaling"
+rootProject.name = "randomvoice-server"
