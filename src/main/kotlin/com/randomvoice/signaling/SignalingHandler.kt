@@ -1,8 +1,13 @@
 package com.randomvoice.signaling
 
+import com.fasterxml.jackson.annotation.JsonCreator
+import com.fasterxml.jackson.annotation.JsonValue
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
-import model.SignalingType
+import com.fasterxml.jackson.module.kotlin.readValue
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import model.SignalingRequest
+import model.SignalingType
 import model.SignalingResponse
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -15,23 +20,35 @@ import java.util.concurrent.ConcurrentHashMap
 
 class SignalingHandler : TextWebSocketHandler() {
 
+    data class DataClass1 (val type: String)
+    data class DataClass2 @JsonCreator(mode = JsonCreator.Mode.DELEGATING) constructor (@JsonValue val content: String)
+
     private val sessionMap = ConcurrentHashMap<String, WebSocketSession>()
     private val matchingQueue = Collections.synchronizedList(mutableListOf<String>())
     private val map1 = ObjectMapper()
+        .registerKotlinModule()
+        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     private val log1: Logger = LoggerFactory.getLogger(SignalingHandler::class.java)
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
+//        val request = """
+//        {
+//            "type": "Login"
+//        }
+//        """
         val request: String = message.payload
-        val header = map1.readValue(request, SignalingRequest::class.java)
+//        val header = map1.readValue(request, SignalingRequest.Login::class.java)
+        val header = map1.readValue<SignalingRequest>(request)
+        val type: String = header.type
         log1.info("Receive message from client:$request")
 
         when {
-            header.type.equals(SignalingType.Login.toString(), ignoreCase = true) -> handleLogin(session, request)
-            header.type.equals(SignalingType.Enter.toString(), ignoreCase = true) -> handleEnter(session, request)
-            header.type.equals(SignalingType.Offer.toString(), ignoreCase = true) -> handleOffer(session, request)
-            header.type.equals(SignalingType.Answer.toString(), ignoreCase = true) -> handleAnswer(session, request)
-            header.type.equals(SignalingType.Ice.toString(), ignoreCase = true) -> handleIce(session, request)
-            header.type.equals(SignalingType.Leave.toString(), ignoreCase = true) -> handleLeave(session, request)
+            type.equals(SignalingType.Login.toString(), ignoreCase = true) -> handleLogin(session, request)
+            type.equals(SignalingType.Enter.toString(), ignoreCase = true) -> handleEnter(session, request)
+            type.equals(SignalingType.Offer.toString(), ignoreCase = true) -> handleOffer(session, request)
+            type.equals(SignalingType.Answer.toString(), ignoreCase = true) -> handleAnswer(session, request)
+            type.equals(SignalingType.Ice.toString(), ignoreCase = true) -> handleIce(session, request)
+            type.equals(SignalingType.Leave.toString(), ignoreCase = true) -> handleLeave(session, request)
         }
     }
 
@@ -42,7 +59,7 @@ class SignalingHandler : TextWebSocketHandler() {
             sessionMap[userId] = session
 
             val payload = SignalingResponse.Login.Payload(
-                data = payload.data,
+                data = userId,
             )
             val sigResp = SignalingResponse.Login(
                 from = "",
@@ -56,7 +73,7 @@ class SignalingHandler : TextWebSocketHandler() {
     }
 
     private inline fun <reified T> convertStringToClass(string: String): T? {
-        return map1.readValue(string, T::class.java)
+        return map1.readValue<T>(string)
     }
 
     private fun doRandomMatching(myId: String): String? =

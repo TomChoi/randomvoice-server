@@ -1,8 +1,9 @@
 package model
 
-class SignalingRequest(
-    val type: String,
-) {
+import com.fasterxml.jackson.annotation.JsonCreator
+import com.fasterxml.jackson.annotation.JsonValue
+
+class SignalingRequest(val type: String) {
 
     data class Login(
         val from: String,
