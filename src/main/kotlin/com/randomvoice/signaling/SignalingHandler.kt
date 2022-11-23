@@ -1,7 +1,5 @@
 package com.randomvoice.signaling
 
-import com.fasterxml.jackson.annotation.JsonCreator
-import com.fasterxml.jackson.annotation.JsonValue
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -20,25 +18,16 @@ import java.util.concurrent.ConcurrentHashMap
 
 class SignalingHandler : TextWebSocketHandler() {
 
-    data class DataClass1 (val type: String)
-    data class DataClass2 @JsonCreator(mode = JsonCreator.Mode.DELEGATING) constructor (@JsonValue val content: String)
-
     private val sessionMap = ConcurrentHashMap<String, WebSocketSession>()
     private val matchingQueue = Collections.synchronizedList(mutableListOf<String>())
-    private val map1 = ObjectMapper()
+    private val mapper = ObjectMapper()
         .registerKotlinModule()
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     private val log1: Logger = LoggerFactory.getLogger(SignalingHandler::class.java)
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
-//        val request = """
-//        {
-//            "type": "Login"
-//        }
-//        """
         val request: String = message.payload
-//        val header = map1.readValue(request, SignalingRequest.Login::class.java)
-        val header = map1.readValue<SignalingRequest>(request)
+        val header = mapper.readValue<SignalingRequest>(request)
         val type: String = header.type
         log1.info("Receive message from client:$request")
 
@@ -68,12 +57,12 @@ class SignalingHandler : TextWebSocketHandler() {
                 payload = payload
             )
 
-            session.sendMessage(TextMessage(map1.writeValueAsString(sigResp)))
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
     private inline fun <reified T> convertStringToClass(string: String): T? {
-        return map1.readValue<T>(string)
+        return mapper.readValue<T>(string)
     }
 
     private fun doRandomMatching(myId: String): String? =
@@ -100,7 +89,7 @@ class SignalingHandler : TextWebSocketHandler() {
                     tx = tx,
                     payload = payload
                 )
-                partner?.sendMessage(TextMessage(map1.writeValueAsString(sigResp)))
+                partner?.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
             }
         }
     }
@@ -116,7 +105,7 @@ class SignalingHandler : TextWebSocketHandler() {
                 tx = tx,
                 payload = payload
             )
-            session.sendMessage(TextMessage(map1.writeValueAsString(sigResp)))
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
@@ -131,7 +120,7 @@ class SignalingHandler : TextWebSocketHandler() {
                 tx = tx,
                 payload = payload
             )
-            session.sendMessage(TextMessage(map1.writeValueAsString(sigResp)))
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
