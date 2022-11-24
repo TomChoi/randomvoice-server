@@ -43,7 +43,6 @@ class SignalingHandler : TextWebSocketHandler() {
 
     private fun handleLogin(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Login>(request)?.apply {
-
             val userId = getNewUserId()
             sessionMap[userId] = session
 
@@ -76,8 +75,9 @@ class SignalingHandler : TextWebSocketHandler() {
         convertStringToClass<SignalingRequest.NewMember>(request)?.apply {
 
             val myUserId = from
-            matchingQueue.add(myUserId)
+            addNewUserToMatchingQueue(myUserId)
 
+            log1.info("[Enter] Current Active User Number is ${matchingQueue.size}")
             doRandomMatching(myUserId)?.also { partnerId ->
                 val partner = sessionMap[partnerId]
                 val payload = SignalingResponse.NewMember.Payload(
@@ -92,6 +92,14 @@ class SignalingHandler : TextWebSocketHandler() {
                 partner?.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
             }
         }
+    }
+
+    private fun addNewUserToMatchingQueue(userId: String) {
+        matchingQueue.add(userId)
+    }
+
+    private fun removeUserFromMatchingQueue(userId: String) {
+        matchingQueue.remove(userId)
     }
 
     private fun handleOffer(session: WebSocketSession, request: String) {
@@ -115,8 +123,8 @@ class SignalingHandler : TextWebSocketHandler() {
                 sdp = payload.sdp
             )
             val sigResp = SignalingResponse.Answer(
-                from = from,
-                to = to,
+                from = "",
+                to = from,
                 tx = tx,
                 payload = payload
             )
@@ -136,7 +144,17 @@ class SignalingHandler : TextWebSocketHandler() {
     }
 
     private fun handleLeave(session: WebSocketSession, request: String) {
-
+        convertStringToClass<SignalingRequest.Leave>(request)?.apply {
+            removeUserFromMatchingQueue(from)
+            log1.info("[Leave] Current Active User Number is ${matchingQueue.size}")
+            val sigResp = SignalingResponse.Ack(
+                from = "",
+                to = from,
+                tx = tx,
+                payload = SignalingResponse.Ack.Payload
+            )
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+        }
     }
 
     private fun sendMessage(session: WebSocketSession, data: String) {

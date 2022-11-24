@@ -1,8 +1,5 @@
 package model
 
-import com.fasterxml.jackson.annotation.JsonCreator
-import com.fasterxml.jackson.annotation.JsonValue
-
 class SignalingRequest(val type: String) {
 
     data class Login(
@@ -47,5 +44,14 @@ class SignalingRequest(val type: String) {
         data class Payload(
             val sdp: String,
         )
+    }
+
+    data class Leave(
+        val from: String,
+        val to: String,
+        val tx: String,
+        val payload: Payload,
+    ) {
+        object Payload
     }
 }
