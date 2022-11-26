@@ -34,9 +34,9 @@ class SignalingHandler : TextWebSocketHandler() {
         when {
             type.equals(SignalingType.Login.toString(), ignoreCase = true) -> handleLogin(session, request)
             type.equals(SignalingType.Enter.toString(), ignoreCase = true) -> handleEnter(session, request)
-            type.equals(SignalingType.Offer.toString(), ignoreCase = true) -> handleOffer(session, request)
-            type.equals(SignalingType.Answer.toString(), ignoreCase = true) -> handleAnswer(session, request)
-            type.equals(SignalingType.Ice.toString(), ignoreCase = true) -> handleIce(session, request)
+            type.equals(SignalingType.Offer.toString(), ignoreCase = true) -> handleOffer(request)
+            type.equals(SignalingType.Answer.toString(), ignoreCase = true) -> handleAnswer(request)
+            type.equals(SignalingType.Ice.toString(), ignoreCase = true) -> handleIce(request)
             type.equals(SignalingType.Leave.toString(), ignoreCase = true) -> handleLeave(session, request)
         }
     }
@@ -55,7 +55,7 @@ class SignalingHandler : TextWebSocketHandler() {
                 tx = tx,
                 payload = payload
             )
-
+            log1.info("Send message to client:$sigResp")
             session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
@@ -84,11 +84,12 @@ class SignalingHandler : TextWebSocketHandler() {
                     data = partnerId
                 )
                 val sigResp = SignalingResponse.NewMember(
-                    from = partnerId,
-                    to = myUserId,
+                    from = myUserId,
+                    to = partnerId,
                     tx = tx,
                     payload = payload
                 )
+                log1.info("Send message to client:$sigResp")
                 partner?.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
             }
         }
@@ -102,45 +103,60 @@ class SignalingHandler : TextWebSocketHandler() {
         matchingQueue.remove(userId)
     }
 
-    private fun handleOffer(session: WebSocketSession, request: String) {
+    private fun handleOffer(request: String) {
         convertStringToClass<SignalingRequest.Offer>(request)?.apply {
-            val payload = SignalingResponse.Offer.Payload(
-                sdp = payload.sdp
-            )
-            val sigResp = SignalingResponse.Offer(
-                from = from,
-                to = to,
-                tx = tx,
-                payload = payload
-            )
-            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+            sessionMap[to]?.also { session ->
+                val payload = SignalingResponse.Offer.Payload(
+                    sdp = payload.sdp
+                )
+                val sigResp = SignalingResponse.Offer(
+                    from = from,
+                    to = to,
+                    tx = tx,
+                    payload = payload
+                )
+                log1.info("Send message to client:$sigResp")
+                session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+            }
         }
     }
 
-    private fun handleAnswer(session: WebSocketSession, request: String) {
+    private fun handleAnswer(request: String) {
         convertStringToClass<SignalingRequest.Answer>(request)?.apply {
-            val payload = SignalingResponse.Answer.Payload(
-                sdp = payload.sdp
-            )
-            val sigResp = SignalingResponse.Answer(
-                from = "",
-                to = from,
-                tx = tx,
-                payload = payload
-            )
-            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+            sessionMap[to]?.also { session ->
+                val payload = SignalingResponse.Answer.Payload(
+                    sdp = payload.sdp
+                )
+                val sigResp = SignalingResponse.Answer(
+                    from = from,
+                    to = to,
+                    tx = tx,
+                    payload = payload
+                )
+                log1.info("Send message to client:$sigResp")
+                session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+            }
         }
     }
 
-    private fun handleIce(session: WebSocketSession, request: String) {
-//        val sigResp = SignalData()
-//        sigResp.userId = data.userId
-//        sigResp.type = SignalingType.Ice.toString()
-//        sigResp.data = data.data
-//        sigResp.toUid = data.toUid
-//        sessionMap[data.userId]?.let { session ->
-//            sendMessage(session, sigResp)
-//        }
+    private fun handleIce(request: String) {
+        convertStringToClass<SignalingRequest.Ice>(request)?.apply {
+            sessionMap[to]?.also { session ->
+                val payload = SignalingResponse.Ice.Payload(
+                    sdpMid = payload.sdpMid,
+                    sdpMLineIndex = payload.sdpMLineIndex,
+                    sdp = payload.sdp
+                )
+                val sigResp = SignalingResponse.Ice(
+                    from = from,
+                    to = to,
+                    tx = tx,
+                    payload = payload
+                )
+                log1.info("Send message to client: $sigResp")
+                session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+            }
+        }
     }
 
     private fun handleLeave(session: WebSocketSession, request: String) {
@@ -153,6 +169,7 @@ class SignalingHandler : TextWebSocketHandler() {
                 tx = tx,
                 payload = SignalingResponse.Ack.Payload
             )
+            log1.info("Send message to client:$sigResp")
             session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }

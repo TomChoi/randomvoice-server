@@ -56,6 +56,20 @@ sealed class SignalingResponse<T>(
         )
     }
 
+    data class Ice(
+        override val type: String = SignalingType.Ice.toString(),
+        override val from: String,
+        override val to: String,
+        override val tx: String,
+        override val payload: Payload,
+    ) : SignalingResponse<Ice.Payload>(type, from, to, tx, payload) {
+        data class Payload(
+            val sdpMid: String,
+            val sdpMLineIndex: Int,
+            val sdp: String
+        )
+    }
+
     data class Ack(
         override val type: String = SignalingType.Ack.toString(),
         override val from: String,
