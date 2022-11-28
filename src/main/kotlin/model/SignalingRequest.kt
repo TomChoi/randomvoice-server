@@ -55,6 +55,15 @@ class SignalingRequest(val type: String) {
         object Payload
     }
 
+    data class Logout(
+        val from: String,
+        val to: String,
+        val tx: String,
+        val payload: Payload,
+    ) {
+        object Payload
+    }
+
     data class Ice(
         val from: String,
         val to: String,

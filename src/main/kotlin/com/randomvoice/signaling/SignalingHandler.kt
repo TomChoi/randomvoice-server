@@ -7,6 +7,7 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import model.SignalingRequest
 import model.SignalingType
 import model.SignalingResponse
+import model.UserInfo
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.web.socket.CloseStatus
@@ -18,8 +19,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 class SignalingHandler : TextWebSocketHandler() {
 
-    private val sessionMap = ConcurrentHashMap<String, WebSocketSession>()
-    private val matchingQueue = Collections.synchronizedList(mutableListOf<String>())
+    private val userMap = ConcurrentHashMap<String, UserInfo>()
+//    private val matchingQueue = Collections.synchronizedList(mutableListOf<String>())
     private val mapper = ObjectMapper()
         .registerKotlinModule()
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
@@ -34,17 +35,21 @@ class SignalingHandler : TextWebSocketHandler() {
         when {
             type.equals(SignalingType.Login.toString(), ignoreCase = true) -> handleLogin(session, request)
             type.equals(SignalingType.Enter.toString(), ignoreCase = true) -> handleEnter(session, request)
-            type.equals(SignalingType.Offer.toString(), ignoreCase = true) -> handleOffer(request)
-            type.equals(SignalingType.Answer.toString(), ignoreCase = true) -> handleAnswer(request)
-            type.equals(SignalingType.Ice.toString(), ignoreCase = true) -> handleIce(request)
+            type.equals(SignalingType.Offer.toString(), ignoreCase = true) -> handleOffer(session, request)
+            type.equals(SignalingType.Answer.toString(), ignoreCase = true) -> handleAnswer(session, request)
+            type.equals(SignalingType.Ice.toString(), ignoreCase = true) -> handleIce(session, request)
             type.equals(SignalingType.Leave.toString(), ignoreCase = true) -> handleLeave(session, request)
+            type.equals(SignalingType.Logout.toString(), ignoreCase = true) -> handleLogout(session, request)
+            else -> {
+                log1.error("Request type not supported, type = $type")
+            }
         }
     }
 
     private fun handleLogin(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Login>(request)?.apply {
             val userId = getNewUserId()
-            sessionMap[userId] = session
+            userMap[userId] = UserInfo(userId, session, false)
 
             val payload = SignalingResponse.Login.Payload(
                 data = userId,
@@ -53,7 +58,7 @@ class SignalingHandler : TextWebSocketHandler() {
                 from = "",
                 to = userId,
                 tx = tx,
-                payload = payload
+                payload = payload,
             )
             log1.info("Send message to client:$sigResp")
             session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
@@ -64,9 +69,20 @@ class SignalingHandler : TextWebSocketHandler() {
         return mapper.readValue<T>(string)
     }
 
-    private fun doRandomMatching(myId: String): String? =
-        matchingQueue.filter { id -> id != myId && sessionMap[id]?.isOpen ?: false }
-            .asSequence().shuffled().find { true }
+    @Synchronized
+    private fun doRandomMatching(myUserInfo: UserInfo): UserInfo? {
+        val partner = userMap.filter { it.value.readyToMatching && it.value.userId != myUserInfo.userId && it.value.session.isOpen }
+            .values.asSequence().shuffled().find { true }
+
+        if (partner == null) {
+            log1.info("random matching failed, size = ${userMap.size}, myUserInfo = $myUserInfo")
+        } else {
+            log1.info("random matching success, partner userId = ${partner.userId} size = ${userMap.size}")
+            myUserInfo.readyToMatching = false
+            partner.readyToMatching = false
+        }
+        return partner
+    }
 
     private fun getNewUserId(): String = UUID.randomUUID().toString()
 
@@ -75,37 +91,44 @@ class SignalingHandler : TextWebSocketHandler() {
         convertStringToClass<SignalingRequest.NewMember>(request)?.apply {
 
             val myUserId = from
-            addNewUserToMatchingQueue(myUserId)
+            val userInfo = userMap[myUserId]
+                userInfo?.also { myUserInfo ->
+                myUserInfo.readyToMatching = true
+                doRandomMatching(myUserInfo)?.also { partnerUserInfo ->
 
-            log1.info("[Enter] Current Active User Number is ${matchingQueue.size}")
-            doRandomMatching(myUserId)?.also { partnerId ->
-                val partner = sessionMap[partnerId]
-                val payload = SignalingResponse.NewMember.Payload(
-                    data = partnerId
-                )
-                val sigResp = SignalingResponse.NewMember(
-                    from = myUserId,
-                    to = partnerId,
-                    tx = tx,
-                    payload = payload
-                )
-                log1.info("Send message to client:$sigResp")
-                partner?.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+                    myUserInfo.readyToMatching = false
+                    partnerUserInfo.readyToMatching = false
+
+                    val payload = SignalingResponse.NewMember.Payload(
+                        data = partnerUserInfo.userId
+                    )
+                    val sigResp = SignalingResponse.NewMember(
+                        from = myUserId,
+                        to = partnerUserInfo.userId,
+                        tx = tx,
+                        payload = payload,
+                    )
+                    log1.info("Send message to client:$sigResp")
+                    partnerUserInfo.session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+                }
             }
+            val sigResp = if (userInfo == null) {
+                SignalingResponse.Ack(from = "", to = from, tx = tx,
+                    error = SignalingResponse.Error(code = 1000, reason = "user not found"))
+            } else {
+                SignalingResponse.Ack(from = "", to = from, tx = tx)
+            }
+
+            log1.info("Send message to client: $sigResp")
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
-    private fun addNewUserToMatchingQueue(userId: String) {
-        matchingQueue.add(userId)
-    }
-
-    private fun removeUserFromMatchingQueue(userId: String) {
-        matchingQueue.remove(userId)
-    }
-
-    private fun handleOffer(request: String) {
+    private fun handleOffer(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Offer>(request)?.apply {
-            sessionMap[to]?.also { session ->
+
+            val targetUserInfo = userMap[to]
+            targetUserInfo?.also { target ->
                 val payload = SignalingResponse.Offer.Payload(
                     sdp = payload.sdp
                 )
@@ -113,17 +136,29 @@ class SignalingHandler : TextWebSocketHandler() {
                     from = from,
                     to = to,
                     tx = tx,
-                    payload = payload
+                    payload = payload,
                 )
                 log1.info("Send message to client:$sigResp")
-                session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+                target.session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
             }
+
+            val sigResp = if (targetUserInfo == null) {
+                SignalingResponse.Ack(from = "", to = from, tx = tx,
+                    error = SignalingResponse.Error(code = 1000, reason = "user not found"))
+            } else {
+                SignalingResponse.Ack(from = "", to = from, tx = tx)
+            }
+
+            log1.info("Send message to client: $sigResp")
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
-    private fun handleAnswer(request: String) {
+    private fun handleAnswer(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Answer>(request)?.apply {
-            sessionMap[to]?.also { session ->
+
+            val targetUserInfo = userMap[to]
+            targetUserInfo?.also { target ->
                 val payload = SignalingResponse.Answer.Payload(
                     sdp = payload.sdp
                 )
@@ -131,17 +166,29 @@ class SignalingHandler : TextWebSocketHandler() {
                     from = from,
                     to = to,
                     tx = tx,
-                    payload = payload
+                    payload = payload,
                 )
                 log1.info("Send message to client:$sigResp")
-                session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+                target.session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
             }
+
+            val sigResp = if (targetUserInfo == null) {
+                SignalingResponse.Ack(from = "", to = from, tx = tx,
+                    error = SignalingResponse.Error(code = 1000, reason = "user not found"))
+            } else {
+                SignalingResponse.Ack(from = "", to = from, tx = tx)
+            }
+
+            log1.info("Send message to client: $sigResp")
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
-    private fun handleIce(request: String) {
+    private fun handleIce(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Ice>(request)?.apply {
-            sessionMap[to]?.also { session ->
+
+            val targetUserInfo = userMap[to]
+            targetUserInfo?.also { target ->
                 val payload = SignalingResponse.Ice.Payload(
                     sdpMid = payload.sdpMid,
                     sdpMLineIndex = payload.sdpMLineIndex,
@@ -151,24 +198,68 @@ class SignalingHandler : TextWebSocketHandler() {
                     from = from,
                     to = to,
                     tx = tx,
-                    payload = payload
+                    payload = payload,
                 )
                 log1.info("Send message to client: $sigResp")
-                session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+                target.session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
             }
+
+            val sigResp = if (targetUserInfo == null) {
+                SignalingResponse.Ack(from = "", to = from, tx = tx,
+                    error = SignalingResponse.Error(code = 1000, reason = "user not found"))
+            } else {
+                SignalingResponse.Ack(from = "", to = from, tx = tx)
+            }
+
+            log1.info("Send message to client: $sigResp")
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
     private fun handleLeave(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Leave>(request)?.apply {
-            removeUserFromMatchingQueue(from)
-            log1.info("[Leave] Current Active User Number is ${matchingQueue.size}")
-            val sigResp = SignalingResponse.Ack(
-                from = "",
-                to = from,
-                tx = tx,
-                payload = SignalingResponse.Ack.Payload
-            )
+
+            val userInfo = userMap[from]
+            val sigResp = if (userInfo == null) {
+                SignalingResponse.Ack(
+                    from = "",
+                    to = from,
+                    tx = tx,
+                    error = SignalingResponse.Error(code = 1000, reason= "user not found")
+                )
+            } else {
+                userInfo.readyToMatching = false
+                SignalingResponse.Ack(
+                    from = "",
+                    to = from,
+                    tx = tx,
+                )
+            }
+            log1.info("Send message to client:$sigResp")
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+        }
+    }
+
+    private fun handleLogout(session: WebSocketSession, request: String) {
+
+        convertStringToClass<SignalingRequest.Logout>(request)?.apply {
+
+            val userInfo = userMap[from]
+            val sigResp = if (userInfo == null) {
+                SignalingResponse.Ack(
+                    from = "",
+                    to = from,
+                    tx = tx,
+                    error = SignalingResponse.Error(code = 1000, reason= "user not found")
+                )
+            } else {
+                userMap.remove(from)
+                SignalingResponse.Ack(
+                    from = "",
+                    to = from,
+                    tx = tx,
+                )
+            }
             log1.info("Send message to client:$sigResp")
             session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }

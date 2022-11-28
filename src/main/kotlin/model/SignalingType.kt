@@ -8,5 +8,6 @@ enum class SignalingType {
     Ice,
     NewMember,
     Leave,
+    Logout,
     Ack
 }
