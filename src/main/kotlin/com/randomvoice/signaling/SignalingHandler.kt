@@ -20,7 +20,6 @@ import java.util.concurrent.ConcurrentHashMap
 class SignalingHandler : TextWebSocketHandler() {
 
     private val userMap = ConcurrentHashMap<String, UserInfo>()
-//    private val matchingQueue = Collections.synchronizedList(mutableListOf<String>())
     private val mapper = ObjectMapper()
         .registerKotlinModule()
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
@@ -40,6 +39,7 @@ class SignalingHandler : TextWebSocketHandler() {
             type.equals(SignalingType.Ice.toString(), ignoreCase = true) -> handleIce(session, request)
             type.equals(SignalingType.Leave.toString(), ignoreCase = true) -> handleLeave(session, request)
             type.equals(SignalingType.Logout.toString(), ignoreCase = true) -> handleLogout(session, request)
+            type.equals(SignalingType.KeepAlive.toString(), ignoreCase = true) -> handleKeepAlive(session, request)
             else -> {
                 log1.error("Request type not supported, type = $type")
             }
@@ -105,7 +105,6 @@ class SignalingHandler : TextWebSocketHandler() {
                     val sigResp = SignalingResponse.NewMember(
                         from = myUserId,
                         to = partnerUserInfo.userId,
-                        tx = tx,
                         payload = payload,
                     )
                     log1.info("Send message to client:$sigResp")
@@ -135,7 +134,6 @@ class SignalingHandler : TextWebSocketHandler() {
                 val sigResp = SignalingResponse.Offer(
                     from = from,
                     to = to,
-                    tx = tx,
                     payload = payload,
                 )
                 log1.info("Send message to client:$sigResp")
@@ -165,7 +163,6 @@ class SignalingHandler : TextWebSocketHandler() {
                 val sigResp = SignalingResponse.Answer(
                     from = from,
                     to = to,
-                    tx = tx,
                     payload = payload,
                 )
                 log1.info("Send message to client:$sigResp")
@@ -197,7 +194,6 @@ class SignalingHandler : TextWebSocketHandler() {
                 val sigResp = SignalingResponse.Ice(
                     from = from,
                     to = to,
-                    tx = tx,
                     payload = payload,
                 )
                 log1.info("Send message to client: $sigResp")
@@ -261,6 +257,31 @@ class SignalingHandler : TextWebSocketHandler() {
                 )
             }
             log1.info("Send message to client:$sigResp")
+            session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+        }
+    }
+
+    private fun handleKeepAlive(session: WebSocketSession, request: String) {
+
+        convertStringToClass<SignalingRequest.KeepAlive>(request)?.apply {
+
+            val userInfo = userMap[from]
+            val sigResp = if (userInfo == null) {
+                SignalingResponse.Ack(
+                    from = "",
+                    to = from,
+                    tx = tx,
+                    error = SignalingResponse.Error(code = 1000, reason = "user not found")
+                )
+            } else {
+
+                SignalingResponse.Ack(
+                    from = "",
+                    to = from,
+                    tx = tx
+                )
+            }
+            log1.info("Send message to client: $sigResp")
             session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }

@@ -76,4 +76,13 @@ class SignalingRequest(val type: String) {
             val sdp: String
         )
     }
+
+    data class KeepAlive(
+        val from: String,
+        val to: String,
+        val tx: String,
+        val payload: Payload,
+    ) {
+        object Payload
+    }
 }

@@ -9,5 +9,6 @@ enum class SignalingType {
     NewMember,
     Leave,
     Logout,
-    Ack
+    Ack,
+    KeepAlive
 }
