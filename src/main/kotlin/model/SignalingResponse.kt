@@ -14,19 +14,19 @@ sealed class SignalingResponse<T>(
         val reason: String
     )
 
-    data class Login(
-        override val type: String = SignalingType.Login.toString(),
-        override val from: String,
-        override val to: String,
-        override val tx: String? = null,
-        override val error: Error? = null,
-        override val payload: Payload? = null
-    ) : SignalingResponse<Login.Payload>(type, from, to, tx, error, payload) {
-        data class Payload(
-            val data: String,
-        )
-    }
-
+//    data class Login(
+//        override val type: String = SignalingType.Login.toString(),
+//        override val from: String,
+//        override val to: String,
+//        override val tx: String? = null,
+//        override val error: Error? = null,
+//        override val payload: Payload? = null
+//    ) : SignalingResponse<Login.Payload>(type, from, to, tx, error, payload) {
+//        data class Payload(
+//            val data: String,
+//        )
+//    }
+//
     data class NewMember(
         override val type: String = SignalingType.NewMember.toString(),
         override val from: String,

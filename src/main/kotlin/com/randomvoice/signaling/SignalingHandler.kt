@@ -48,17 +48,13 @@ class SignalingHandler : TextWebSocketHandler() {
 
     private fun handleLogin(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Login>(request)?.apply {
-            val userId = getNewUserId()
+            val userId = payload.data
             userMap[userId] = UserInfo(userId, session, false)
 
-            val payload = SignalingResponse.Login.Payload(
-                data = userId,
-            )
-            val sigResp = SignalingResponse.Login(
+            val sigResp = SignalingResponse.Ack(
                 from = "",
-                to = userId,
+                to = from,
                 tx = tx,
-                payload = payload,
             )
             log1.info("Send message to client:$sigResp")
             session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
@@ -296,9 +292,17 @@ class SignalingHandler : TextWebSocketHandler() {
 
     override fun afterConnectionEstablished(session: WebSocketSession) {
         super.afterConnectionEstablished(session)
+        session.handshakeHeaders["userId"]?.find { true }?.let { userId ->
+            log1.info("WebSocket established userId: $userId")
+            userMap[userId] = UserInfo(userId, session, false)
+        }
     }
 
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         super.afterConnectionClosed(session, status)
+        session.handshakeHeaders["userId"]?.find { true }?.let { userId ->
+            log1.info("WebSocket closed userId: $userId")
+            userMap.remove(userId)
+        }
     }
 }
