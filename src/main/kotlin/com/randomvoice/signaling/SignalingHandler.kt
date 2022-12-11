@@ -4,10 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import model.SignalingRequest
-import model.SignalingType
-import model.SignalingResponse
-import model.UserInfo
+import model.*
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.web.socket.CloseStatus
@@ -20,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 class SignalingHandler : TextWebSocketHandler() {
 
     private val userMap = ConcurrentHashMap<String, UserInfo>()
+    private val roomMap = ConcurrentHashMap<String, RoomInfo>()
     private val mapper = ObjectMapper()
         .registerKotlinModule()
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
@@ -49,7 +47,7 @@ class SignalingHandler : TextWebSocketHandler() {
     private fun handleLogin(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Login>(request)?.apply {
             val userId = payload.data
-            userMap[userId] = UserInfo(userId, session, false)
+            userMap[userId] = UserInfo(userId, session)
 
             val sigResp = SignalingResponse.Ack(
                 from = "",
@@ -65,60 +63,60 @@ class SignalingHandler : TextWebSocketHandler() {
         return mapper.readValue<T>(string)
     }
 
-    @Synchronized
-    private fun doRandomMatching(myUserInfo: UserInfo): UserInfo? {
-        val partner = userMap.filter { it.value.readyToMatching && it.value.userId != myUserInfo.userId && it.value.session.isOpen }
-            .values.asSequence().shuffled().find { true }
-
-        if (partner == null) {
-            log1.info("random matching failed, size = ${userMap.size}, myUserInfo = $myUserInfo")
-        } else {
-            log1.info("random matching success, partner userId = ${partner.userId} size = ${userMap.size}")
-            myUserInfo.readyToMatching = false
-            partner.readyToMatching = false
-        }
-        return partner
+    private fun createRoom(): RoomInfo {
+        val id = UUID.randomUUID().toString()
+        log1.info("createRoom (id: $id)")
+        val room = RoomInfo(id, 2)
+        roomMap[id] = room
+        return room
     }
 
-    private fun getNewUserId(): String = UUID.randomUUID().toString()
+    private fun destroyRoom(roomId: String) {
+        log1.info("destroyRoom (id: $roomId")
+        roomMap.remove(roomId)
+    }
 
+    private fun findRoom(): RoomInfo {
+        return roomMap.filter { it.value.participants.size < it.value.maxParticipant }
+            .values.asSequence().shuffled().find { true } ?: createRoom()
+    }
+
+    @Synchronized
     private fun handleEnter(session: WebSocketSession, request: String) {
 
         convertStringToClass<SignalingRequest.NewMember>(request)?.apply {
 
             val myUserId = from
             val userInfo = userMap[myUserId]
-                userInfo?.also { myUserInfo ->
-                myUserInfo.readyToMatching = true
-                doRandomMatching(myUserInfo)?.also { partnerUserInfo ->
-
-                    myUserInfo.readyToMatching = false
-                    partnerUserInfo.readyToMatching = false
-
-                    val payload = SignalingResponse.NewMember.Payload(
-                        data = partnerUserInfo.userId
-                    )
-                    val sigResp = SignalingResponse.NewMember(
-                        from = myUserId,
-                        to = partnerUserInfo.userId,
-                        payload = payload,
-                    )
-                    log1.info("Send message to client:$sigResp")
-                    partnerUserInfo.session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+            val sigResp = if (userInfo != null) {
+                findRoom().also {
+                    log1.info("find room size(${roomMap.size}): (id: ${it.id}, maxParticipant: ${it.maxParticipant}, participant: ${it.participants}")
+                    it.participants.forEach { partnerUserInfo ->
+                        val payload = SignalingResponse.NewMember.Payload(
+                            data = partnerUserInfo.userId
+                        )
+                        val sigResp = SignalingResponse.NewMember(
+                            from = myUserId,
+                            to = partnerUserInfo.userId,
+                            payload = payload,
+                        )
+                        log1.info("Send message to client:$sigResp")
+                        partnerUserInfo.session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
+                    }
+                    userInfo.roomId = it.id
+                    it.participants.add(userInfo)
                 }
-            }
-            val sigResp = if (userInfo == null) {
+                SignalingResponse.Ack(from = "", to = from, tx = tx)
+            } else {
                 SignalingResponse.Ack(from = "", to = from, tx = tx,
                     error = SignalingResponse.Error(code = 1000, reason = "user not found"))
-            } else {
-                SignalingResponse.Ack(from = "", to = from, tx = tx)
             }
-
             log1.info("Send message to client: $sigResp")
             session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
+    @Synchronized
     private fun handleOffer(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Offer>(request)?.apply {
 
@@ -148,6 +146,7 @@ class SignalingHandler : TextWebSocketHandler() {
         }
     }
 
+    @Synchronized
     private fun handleAnswer(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Answer>(request)?.apply {
 
@@ -177,6 +176,7 @@ class SignalingHandler : TextWebSocketHandler() {
         }
     }
 
+    @Synchronized
     private fun handleIce(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Ice>(request)?.apply {
 
@@ -192,7 +192,7 @@ class SignalingHandler : TextWebSocketHandler() {
                     to = to,
                     payload = payload,
                 )
-                log1.info("Send message to client: $sigResp")
+//                log1.info("Send message to client: $sigResp")
                 target.session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
             }
 
@@ -203,11 +203,12 @@ class SignalingHandler : TextWebSocketHandler() {
                 SignalingResponse.Ack(from = "", to = from, tx = tx)
             }
 
-            log1.info("Send message to client: $sigResp")
+//            log1.info("Send message to client: $sigResp")
             session.sendMessage(TextMessage(mapper.writeValueAsString(sigResp)))
         }
     }
 
+    @Synchronized
     private fun handleLeave(session: WebSocketSession, request: String) {
         convertStringToClass<SignalingRequest.Leave>(request)?.apply {
 
@@ -220,7 +221,7 @@ class SignalingHandler : TextWebSocketHandler() {
                     error = SignalingResponse.Error(code = 1000, reason= "user not found")
                 )
             } else {
-                userInfo.readyToMatching = false
+                leaveRoom(userInfo)
                 SignalingResponse.Ack(
                     from = "",
                     to = from,
@@ -232,6 +233,7 @@ class SignalingHandler : TextWebSocketHandler() {
         }
     }
 
+    @Synchronized
     private fun handleLogout(session: WebSocketSession, request: String) {
 
         convertStringToClass<SignalingRequest.Logout>(request)?.apply {
@@ -290,11 +292,23 @@ class SignalingHandler : TextWebSocketHandler() {
         }
     }
 
+    @Synchronized
+    private fun leaveRoom(userInfo: UserInfo) {
+        userInfo.roomId?.also { id ->
+            roomMap[id]?.also { roomInfo ->
+                roomInfo.participants.remove(userInfo)
+                if (roomInfo.participants.size == 0) {
+                    destroyRoom(id)
+                }
+            }
+        }
+    }
+
     override fun afterConnectionEstablished(session: WebSocketSession) {
         super.afterConnectionEstablished(session)
         session.handshakeHeaders["userId"]?.find { true }?.let { userId ->
             log1.info("WebSocket established userId: $userId")
-            userMap[userId] = UserInfo(userId, session, false)
+            userMap[userId] = UserInfo(userId, session)
         }
     }
 
@@ -302,6 +316,9 @@ class SignalingHandler : TextWebSocketHandler() {
         super.afterConnectionClosed(session, status)
         session.handshakeHeaders["userId"]?.find { true }?.let { userId ->
             log1.info("WebSocket closed userId: $userId")
+            userMap[userId]?.also {
+                leaveRoom(it)
+            }
             userMap.remove(userId)
         }
     }
