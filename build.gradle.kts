@@ -21,6 +21,15 @@ dependencies {
 	implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 	implementation("org.jetbrains.kotlin:kotlin-reflect")
 	implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+
+	// hemp you monitor and manage your application when you push it to production
+	implementation("org.springframework.boot:spring-boot-starter-actuator")
+
+	// DB
+	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+	runtimeOnly("com.h2database:h2")
+
+	// for test
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
 
